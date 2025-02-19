@@ -11,35 +11,37 @@ from PIL import Image
 import random
 import copy
 
-class UAVEnv:
-    def __init__(self,length=2,num_obstacle=3,num_agents=4):
-        self.length = length # length of boundary
-        self.num_obstacle = num_obstacle # number of obstacles
-        self.num_agents = num_agents
-        self.time_step = 0.5 # update time step
-        self.v_max = 0.1
-        self.v_max_e = 0.12
-        self.a_max = 0.04
-        self.a_max_e = 0.05
+class UAVUSVEnv:
+    def __init__(self, length=2, num_obstacle=3, num_uavs=2, num_usvs=2):
+        self.length = length
+        self.num_obstacle = num_obstacle
+        self.num_uavs = num_uavs
+        self.num_usvs = num_usvs
+        self.num_agents = num_uavs + num_usvs
+        self.time_step = 0.5
+        self.v_max_uav = 0.1
+        self.v_max_usv = 0.05
+        self.a_max_uav = 0.04
+        self.a_max_usv = 0.02
         self.L_sensor = 0.2
-        self.num_lasers = 16 # num of laserbeams
+        self.num_lasers = 16
         self.multi_current_lasers = [[self.L_sensor for _ in range(self.num_lasers)] for _ in range(self.num_agents)]
-        self.agents = ['agent_0','agent_1','agent_2','target']
-        self.info = np.random.get_state() # get seed
+        self.agents = ['uav_0', 'uav_1', 'usv_0', 'usv_1']
+        self.info = np.random.get_state()
         self.obstacles = [obstacle() for _ in range(self.num_obstacle)]
-        self.history_positions = [[] for _ in range(num_agents)]
+        self.history_positions = [[] for _ in range(self.num_agents)]
 
         self.action_space = {
-            'agent_0': spaces.Box(low=-np.inf, high=np.inf, shape=(2,)),
-            'agent_1': spaces.Box(low=-np.inf, high=np.inf, shape=(2,)),
-            'agent_2': spaces.Box(low=-np.inf, high=np.inf, shape=(2,)),
-            'target': spaces.Box(low=-np.inf, high=np.inf, shape=(2,))
-            } # action represents [a_x,a_y]
+            'uav_0': spaces.Box(low=-1, high=1, shape=(2,)),
+            'uav_1': spaces.Box(low=-1, high=1, shape=(2,)),
+            'usv_0': spaces.Box(low=-1, high=1, shape=(2,)),
+            'usv_1': spaces.Box(low=-1, high=1, shape=(2,))
+        }
         self.observation_space = {
-            'agent_0': spaces.Box(low=-np.inf, high=np.inf, shape=(26,)),
-            'agent_1': spaces.Box(low=-np.inf, high=np.inf, shape=(26,)),
-            'agent_2': spaces.Box(low=-np.inf, high=np.inf, shape=(26,)),
-            'target': spaces.Box(low=-np.inf, high=np.inf, shape=(23,))
+            'uav_0': spaces.Box(low=-np.inf, high=np.inf, shape=(26,)),  # 4 + 4 + 16 + 2
+            'uav_1': spaces.Box(low=-np.inf, high=np.inf, shape=(26,)),  # 4 + 4 + 16 + 2
+            'usv_0': spaces.Box(low=-np.inf, high=np.inf, shape=(20,)),  # 4 + 16
+            'usv_1': spaces.Box(low=-np.inf, high=np.inf, shape=(20,))   # 4 + 16
         }
         
 
@@ -50,10 +52,9 @@ class UAVEnv:
         self.multi_current_vel = []
         self.history_positions = [[] for _ in range(self.num_agents)]
         for i in range(self.num_agents):
-            if i != self.num_agents - 1: # if not target
+            if i < self.num_uavs: # if UAV
                 self.multi_current_pos.append(np.random.uniform(low=0.1,high=0.4,size=(2,)))
-            else: # for target
-                # self.multi_current_pos.append(np.array([1.0,0.25]))
+            else: # if USV
                 self.multi_current_pos.append(np.array([0.5,1.75]))
             self.multi_current_vel.append(np.zeros(2)) # initial velocity = [0,0]
 
@@ -70,19 +71,19 @@ class UAVEnv:
         for i in range(self.num_agents):
 
             pos = self.multi_current_pos[i]
-            if i != self.num_agents - 1:
+            if i < self.num_uavs:
                 pos_taget = self.multi_current_pos[-1]
                 last_d2target.append(np.linalg.norm(pos-pos_taget))
             
             self.multi_current_vel[i][0] += actions[i][0] * self.time_step
             self.multi_current_vel[i][1] += actions[i][1] * self.time_step
             vel_magnitude = np.linalg.norm(self.multi_current_vel)
-            if i != self.num_agents - 1:
-                if vel_magnitude >= self.v_max:
-                    self.multi_current_vel[i] = self.multi_current_vel[i] / vel_magnitude * self.v_max
+            if i < self.num_uavs:
+                if vel_magnitude >= self.v_max_uav:
+                    self.multi_current_vel[i] = self.multi_current_vel[i] / vel_magnitude * self.v_max_uav
             else:
-                if vel_magnitude >= self.v_max_e:
-                    self.multi_current_vel[i] = self.multi_current_vel[i] / vel_magnitude * self.v_max_e
+                if vel_magnitude >= self.v_max_usv:
+                    self.multi_current_vel[i] = self.multi_current_vel[i] / vel_magnitude * self.v_max_usv
 
             self.multi_current_pos[i][0] += self.multi_current_vel[i][0] * self.time_step
             self.multi_current_pos[i][1] += self.multi_current_vel[i][1] * self.time_step
@@ -114,48 +115,61 @@ class UAVEnv:
             S_uavi = [
                 pos[0]/self.length,
                 pos[1]/self.length,
-                vel[0]/self.v_max,
-                vel[1]/self.v_max
+                vel[0]/self.v_max_uav,
+                vel[1]/self.v_max_uav
             ]
             total_obs.append(S_uavi)
         return total_obs
     
     def get_multi_obs(self):
         total_obs = []
-        single_obs = []
-        S_evade_d = [] # dim 3 only for target
         for i in range(self.num_agents):
             pos = self.multi_current_pos[i]
             vel = self.multi_current_vel[i]
+            
+            # 基础状态信息 (4维)
             S_uavi = [
                 pos[0]/self.length,
                 pos[1]/self.length,
-                vel[0]/self.v_max,
-                vel[1]/self.v_max
-            ] # dim 4
-            S_team = [] # dim 4 for 3 agents 1 target
-            S_target = [] # dim 2
-            for j in range(self.num_agents):
-                if j != i and j != self.num_agents - 1: 
-                    pos_other = self.multi_current_pos[j]
-                    S_team.extend([pos_other[0]/self.length,pos_other[1]/self.length])
-                elif j == self.num_agents - 1:
-                    pos_target = self.multi_current_pos[j]
-                    d = np.linalg.norm(pos - pos_target)
-                    theta = np.arctan2(pos_target[1]-pos[1], pos_target[0]-pos[0])
-                    S_target.extend([d/np.linalg.norm(2*self.length), theta])
-                    if i != self.num_agents - 1:
-                        S_evade_d.append(d/np.linalg.norm(2*self.length))
-
-            S_obser = self.multi_current_lasers[i] # dim 16
-
-            if i != self.num_agents - 1:
-                single_obs = [S_uavi,S_team,S_obser,S_target]
-            else:
-                single_obs = [S_uavi,S_obser,S_evade_d]
-            _single_obs = list(itertools.chain(*single_obs))
-            total_obs.append(_single_obs)
+                vel[0]/self.v_max_uav if i < self.num_uavs else vel[0]/self.v_max_usv,
+                vel[1]/self.v_max_uav if i < self.num_uavs else vel[1]/self.v_max_usv
+            ]
             
+            if i < self.num_uavs:  # UAV agents (26维 = 4 + 4 + 16 + 2)
+                # UAV观察空间包含更多信息
+                S_team = []  # 4维
+                S_target = []  # 2维
+                for j in range(self.num_agents):
+                    if j != i and j != self.num_agents - 1:
+                        pos_other = self.multi_current_pos[j]
+                        S_team.extend([pos_other[0]/self.length, pos_other[1]/self.length])
+                    elif j == self.num_agents - 1:
+                        pos_target = self.multi_current_pos[j]
+                        d = np.linalg.norm(pos - pos_target)
+                        theta = np.arctan2(pos_target[1]-pos[1], pos_target[0]-pos[0])
+                        S_target.extend([d/np.linalg.norm(2*self.length), theta])
+                
+                S_obser = self.multi_current_lasers[i]  # 16维
+                single_obs = [S_uavi, S_team, S_obser, S_target]
+                
+            elif i < self.num_agents - 1:  # USV agents (20维 = 4 + 16)
+                # USV观察空间较简单
+                S_obser = self.multi_current_lasers[i]  # 16维
+                single_obs = [S_uavi, S_obser]  # 4 + 16 = 20维
+                
+            else:  # Target agent (20维 = 4 + 16)
+                # Target的观察空间也保持20维一致
+                S_obser = self.multi_current_lasers[i]  # 16维
+                single_obs = [S_uavi, S_obser]  # 4 + 16 = 20维
+            
+            _single_obs = list(itertools.chain(*single_obs))
+            
+            # 验证观察空间维度
+            expected_dims = 26 if i < self.num_uavs else 20
+            assert len(_single_obs) == expected_dims, f"Agent {i} observation dimension mismatch. Expected {expected_dims}, got {len(_single_obs)}"
+            
+            total_obs.append(_single_obs)
+        
         return total_obs
 
     def cal_rewards_dones(self,IsCollied,last_d):
@@ -168,7 +182,7 @@ class UAVEnv:
         d_capture = 0.3
         d_limit = 0.75
         ## 1 reward for single rounding-up-UAVs:
-        for i in range(3):
+        for i in range(self.num_uavs):
             pos = self.multi_current_pos[i]
             vel = self.multi_current_vel[i]
             pos_target = self.multi_current_pos[-1]
@@ -177,7 +191,7 @@ class UAVEnv:
             d = np.linalg.norm(dire_vec) # distance to target
 
             cos_v_d = np.dot(vel,dire_vec)/(v_i*d + 1e-3)
-            r_near = abs(2*v_i/self.v_max)*cos_v_d
+            r_near = abs(2*v_i/self.v_max_uav)*cos_v_d
             # r_near = min(abs(v_i/self.v_max)*1.0/(d + 1e-5),10)/5
             rewards[i] += mu1 * r_near # TODO: if not get nearer then receive negative reward
         
@@ -211,19 +225,19 @@ class UAVEnv:
         # 3.2 stage-1 track
         if Sum_S > S4 and Sum_d >= d_limit and all(d >= d_capture for d in [d1, d2, d3]):
             r_track = - Sum_d/max([d1,d2,d3])
-            rewards[0:2] += mu3*r_track
+            rewards[0:self.num_uavs] += mu3*r_track
         # 3.3 stage-2 encircle
         elif Sum_S > S4 and (Sum_d < d_limit or any(d >= d_capture for d in [d1, d2, d3])):
             r_encircle = -1/3*np.log(Sum_S - S4 + 1)
-            rewards[0:2] += mu3*r_encircle
+            rewards[0:self.num_uavs] += mu3*r_encircle
         # 3.4 stage-3 capture
         elif Sum_S == S4 and any(d > d_capture for d in [d1,d2,d3]):
-            r_capture = np.exp((Sum_last_d - Sum_d)/(3*self.v_max))
-            rewards[0:2] += mu3*r_capture
+            r_capture = np.exp((Sum_last_d - Sum_d)/(3*self.v_max_uav))
+            rewards[0:self.num_uavs] += mu3*r_capture
         
         ## 4 finish rewards
         if Sum_S == S4 and all(d <= d_capture for d in [d1,d2,d3]):
-            rewards[0:2] += mu4*10
+            rewards[0:self.num_uavs] += mu4*10
             dones = [True] * self.num_agents
 
         return rewards,dones
@@ -257,7 +271,7 @@ class UAVEnv:
         # icon_height, icon_width, _ = uav_icon.shape
 
         # plot round-up-UAVs
-        for i in range(self.num_agents - 1):
+        for i in range(self.num_uavs):
             pos = copy.deepcopy(self.multi_current_pos[i])
             vel = self.multi_current_vel[i]
             self.history_positions[i].append(pos)
@@ -310,7 +324,7 @@ class UAVEnv:
         
         uav_icon = mpimg.imread('UAV.png')
 
-        for i in range(self.num_agents - 1):
+        for i in range(self.num_uavs):
             pos = copy.deepcopy(self.multi_current_pos[i])
             vel = self.multi_current_vel[i]
             angle = np.arctan2(vel[1], vel[0])

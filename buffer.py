@@ -8,7 +8,8 @@ class MultiAgentReplayBuffer:
         self.n_agents = n_agents
         self.actor_dims = actor_dims
         self.batch_size = batch_size
-        self.n_actions = n_actions
+        self.n_actions = 2  # 固定动作维度为2
+        self.action_dims = n_actions  # 保存原始的n_actions列表
 
         self.state_memory = np.zeros((self.mem_size, critic_dims))
         self.new_state_memory = np.zeros((self.mem_size, critic_dims))

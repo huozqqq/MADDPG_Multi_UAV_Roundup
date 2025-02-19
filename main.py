@@ -1,6 +1,6 @@
 import numpy as np
 from maddpg import MADDPG
-from sim_env import UAVEnv
+from sim_env import UAVUSVEnv
 from buffer import MultiAgentReplayBuffer
 import time
 import pandas as pd
@@ -8,6 +8,7 @@ import os
 import matplotlib.pyplot as plt
 import warnings
 from PIL import Image
+import imageio
 warnings.filterwarnings('ignore')
 
 def obs_list_to_state_vector(obs):
@@ -22,20 +23,25 @@ def save_image(env_render, filename):
     image.save(filename)
 
 if __name__ == '__main__':
-
-    env = UAVEnv()
-    # print(env.info)
+    env = UAVUSVEnv()
     n_agents = env.num_agents
+    
+    # 获取每个智能体的观察空间和动作空间维度
     actor_dims = []
-    for agent_id in env.observation_space.keys():
-        actor_dims.append(env.observation_space[agent_id].shape[0])
+    n_actions = []
+    for agent_id in env.agents:
+        obs_dim = env.observation_space[agent_id].shape[0]
+        act_dim = env.action_space[agent_id].shape[0]
+        # print(f"Agent {agent_id} - Observation dim: {obs_dim}, Action dim: {act_dim}")
+        actor_dims.append(obs_dim)
+        n_actions.append(act_dim)
+    
     critic_dims = sum(actor_dims)
+    # print(f"Critic input dimension: {critic_dims}")
 
-    # action space is a list of arrays, assume each agent has same action space
-    n_actions = 2
     maddpg_agents = MADDPG(actor_dims, critic_dims, n_agents, n_actions, 
-                           fc1=128, fc2=128,
-                           alpha=0.0001, beta=0.003, scenario='UAV_Round_up',
+                           fc1=64, fc2=64,
+                           alpha=0.0001, beta=0.003, scenario='UAV_USV',
                            chkpt_dir='tmp/maddpg/')
 
     memory = MultiAgentReplayBuffer(1000000, critic_dims, actor_dims, 
@@ -47,7 +53,7 @@ if __name__ == '__main__':
     total_steps = 0
     score_history = []
     target_score_history = []
-    evaluate = True
+    evaluate = False
     best_score = -30
 
     if evaluate:
@@ -56,6 +62,9 @@ if __name__ == '__main__':
     else:
         print('----training start----')
     
+    obs = env.reset()
+    print("Initial observation shapes:")
+
     for i in range(N_GAMES):
         obs = env.reset()
         score = 0
@@ -64,14 +73,11 @@ if __name__ == '__main__':
         episode_step = 0
         while not any(dones):
             if evaluate:
-                # env.render()
-                env_render = env.render()
-                if episode_step % 10 == 0:
-                    # Save the image every 10 episode steps
-                    filename = f'images/episode_{i}_step_{episode_step}.png'
-                    os.makedirs(os.path.dirname(filename), exist_ok=True)  # Create directory if it doesn't exist
-                    save_image(env_render, filename)
-                # time.sleep(0.01)
+                plt.ion()  # 打开交互模式
+                env.render_anime(episode_step)
+                plt.pause(0.01)  # 暂停一小段时间以便观察
+                plt.show()
+
             actions = maddpg_agents.choose_action(obs,total_steps,evaluate)
             obs_, rewards, dones = env.step(actions)
 
@@ -111,3 +117,13 @@ if __name__ == '__main__':
     else:
         with open(file_name, 'a') as f:
             pd.DataFrame([score_history]).to_csv(f, header=False, index=False)
+
+    if evaluate:
+        # 创建动画
+        images = []
+        image_dir = 'images'
+        for filename in sorted(os.listdir(image_dir)):
+            if filename.endswith('.png'):
+                file_path = os.path.join(image_dir, filename)
+                images.append(imageio.imread(file_path))
+        imageio.mimsave('uav_pursuit.gif', images, fps=10)

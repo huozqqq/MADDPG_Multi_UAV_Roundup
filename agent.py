@@ -4,28 +4,35 @@ import numpy as np
 
 class Agent:
     def __init__(self, actor_dims, critic_dims, n_actions, n_agents, agent_idx, chkpt_dir,
-                    alpha=0.0001, beta=0.0002, fc1=128,
-                    fc2=128, gamma=0.99, tau=0.01):
+                    alpha=0.0001, beta=0.0002, fc1=64,
+                    fc2=64, gamma=0.99, tau=0.01):
         self.gamma = gamma
         self.tau = tau
         self.n_actions = n_actions
         self.agent_name = 'agent_%s' % agent_idx
-        self.actor = ActorNetwork(alpha, actor_dims, fc1, fc2, n_actions, 
-                                  chkpt_dir=chkpt_dir,  name=self.agent_name+'_actor')
-        self.critic = CriticNetwork(beta, critic_dims, 
-                            fc1, fc2, n_agents, n_actions, 
-                            chkpt_dir=chkpt_dir, name=self.agent_name+'_critic')
+        
+        # print(f"Initializing agent {agent_idx} with actor_dims: {actor_dims}")
+
+        # 根据agent_idx选择不同的网络结构
+        if agent_idx < 2:  # UAV agents
+            self.actor = ActorNetwork(alpha, actor_dims, fc1, fc2, n_actions, 
+                                    name=f'uav_{agent_idx}_actor', chkpt_dir=chkpt_dir)
+        else:  # USV agents
+            self.actor = ActorNetwork(alpha, actor_dims, fc1, fc2, n_actions, 
+                                    name=f'usv_{agent_idx-2}_actor', chkpt_dir=chkpt_dir)
+        
+        # Critic网络对所有智能体使用相同的结构
+        self.critic = CriticNetwork(beta, critic_dims, fc1, fc2, n_agents, n_actions, 
+                                name=f'agent_{agent_idx}_critic', chkpt_dir=chkpt_dir)
         self.target_actor = ActorNetwork(alpha, actor_dims, fc1, fc2, n_actions,
-                                        chkpt_dir=chkpt_dir, 
-                                        name=self.agent_name+'_target_actor')
-        self.target_critic = CriticNetwork(beta, critic_dims, 
-                                            fc1, fc2, n_agents, n_actions,
-                                            chkpt_dir=chkpt_dir,
-                                            name=self.agent_name+'_target_critic')
+                                name=f'agent_{agent_idx}_target_actor', chkpt_dir=chkpt_dir)
+        self.target_critic = CriticNetwork(beta, critic_dims, fc1, fc2, n_agents, n_actions,
+                                name=f'agent_{agent_idx}_target_critic', chkpt_dir=chkpt_dir)
 
         self.update_network_parameters(tau=1)
 
     def choose_action(self, observation, time_step, evaluate=False):
+        # print(f"Agent {self.agent_name} received observation of shape: {len(observation)}")
         state = T.tensor([observation], dtype=T.float).to(self.actor.device)
         actions = self.actor.forward(state)
 

@@ -6,18 +6,22 @@ from agent import Agent
 
 class MADDPG:
     def __init__(self, actor_dims, critic_dims, n_agents, n_actions, 
-                 scenario='simple',  alpha=0.01, beta=0.02, fc1=128, 
-                 fc2=128, gamma=0.99, tau=0.01, chkpt_dir='tmp/maddpg/'):
+                 scenario='simple',  alpha=0.01, beta=0.02, fc1=64, 
+                 fc2=64, gamma=0.99, tau=0.01, chkpt_dir='tmp/maddpg/'):
         self.agents = []
         self.n_agents = n_agents
-        self.n_actions = n_actions
+        self.n_actions = 2  # 每个智能体的动作维度都是2
+        self.action_dims = n_actions  # 保存原始的n_actions列表
+        self.scenario = scenario
         chkpt_dir += scenario
         # self.writer = SummaryWriter(log_dir=os.path.join(chkpt_dir, 'logs'))
 
         for agent_idx in range(self.n_agents):
             self.agents.append(Agent(actor_dims[agent_idx], critic_dims,  
-                            n_actions, n_agents, agent_idx, alpha=alpha, beta=beta,
-                            chkpt_dir=chkpt_dir))
+                            n_actions[agent_idx], n_agents, agent_idx, 
+                            alpha=alpha, beta=beta,
+                            chkpt_dir=chkpt_dir,
+                            fc1=fc1, fc2=fc2))
 
     def save_checkpoint(self):
         print('... saving checkpoint ...')
@@ -30,10 +34,11 @@ class MADDPG:
         for agent in self.agents:
             agent.load_models()
 
-    def choose_action(self, raw_obs, time_step, evaluate):# timestep for exploration
+    def choose_action(self, raw_obs, time_step, evaluate):
         actions = []
         for agent_idx, agent in enumerate(self.agents):
-            action = agent.choose_action(raw_obs[agent_idx],time_step, evaluate)
+            # print(f"Agent {agent_idx} observation shape: {len(raw_obs[agent_idx])}")
+            action = agent.choose_action(raw_obs[agent_idx], time_step, evaluate)
             actions.append(action)
         return actions
 
@@ -56,17 +61,15 @@ class MADDPG:
         old_agents_actions = []
     
         for agent_idx, agent in enumerate(self.agents):
-
             new_states = T.tensor(actor_new_states[agent_idx], 
                                 dtype=T.float).to(device)
 
             new_pi = agent.target_actor.forward(new_states)
-
             all_agents_new_actions.append(new_pi)
             old_agents_actions.append(actions[agent_idx])
 
         new_actions = T.cat([acts for acts in all_agents_new_actions], dim=1)
-        old_actions = T.cat([acts for acts in old_agents_actions],dim=1)
+        old_actions = T.cat([acts for acts in old_agents_actions], dim=1)
 
         for agent_idx, agent in enumerate(self.agents):
             with T.no_grad():
@@ -83,7 +86,8 @@ class MADDPG:
 
             mu_states = T.tensor(actor_states[agent_idx], dtype=T.float).to(device)
             oa = old_actions.clone()
-            oa[:,agent_idx*self.n_actions:agent_idx*self.n_actions+self.n_actions] = agent.actor.forward(mu_states)            
+            # 使用固定的动作维度2
+            oa[:, agent_idx*self.n_actions:(agent_idx+1)*self.n_actions] = agent.actor.forward(mu_states)
             actor_loss = -T.mean(agent.critic.forward(states, oa).flatten())
             agent.actor.optimizer.zero_grad()
             actor_loss.backward(retain_graph=True)
@@ -102,3 +106,7 @@ class MADDPG:
             
         for agent in self.agents:    
             agent.update_network_parameters()
+
+        # 对抗学习逻辑
+        # 例如，使用对抗损失来更新策略
+        pass
